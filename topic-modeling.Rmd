@@ -1,0 +1,157 @@
+---
+ title: "Assignment 2"
+subtitle: "Text as Data"
+date: "2022-10-13"
+author: "Janine De Vera | 219848"
+output: 
+ pdf_document:
+ keep_tex: true
+citation_package: natbib
+header-includes:
+ - \usepackage{booktabs}
+- \usepackage{xcolor}
+
+extra_dependencies: ["hyperref","booktabs"]
+urlcolor: blue
+bibliography: ../presentation-resources/MyLibrary.bib
+---
+ 
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      warning = FALSE, 
+                      error = FALSE, 
+                      message = FALSE)
+```
+
+```{r, include = FALSE}
+pacman::p_load(tidyverse, readr, stringr, quanteda, quanteda.textstats, rvest, tibble, xml2, manifestoR)
+```
+
+```{r, include = FALSE}
+charts.theme <- theme(axis.title.y.left = element_text(size = 12, margin = margin(r = 15)),
+                      axis.title.y.right = element_text(size = 12, margin = margin(l = 15)),
+                      axis.title.x = element_text(size = 12, margin = margin(t = 15)),
+                      axis.text.x = element_text(size = 12),
+                      axis.text.y = element_text(size = 12),
+                      axis.ticks = element_blank(),
+                      axis.line.x = element_line("transparent", size = 0.5), 
+                      axis.line.y = element_line("transparent", size = 0.5),
+                      panel.border = element_rect(color = "#a3a3a3", fill = "transparent"),
+                      panel.background = element_rect(fill = "white", color = "white"),
+                      panel.grid.major = element_line(color = "#d4d4d4", linetype = 2),
+                      plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+                      plot.subtitle = element_text(size = 10, face = "italic", hjust = 0.5, margin = margin(b = 15)),
+                      plot.caption = element_text(size = 10, hjust = 0),
+                      strip.background = element_rect(fill = "transparent"),
+                      strip.text = element_text(size = 12))
+```
+
+
+ # Introduction
+ 
+ In this assignment, you are asked to use topic modelling to investigate manifestos from the manifesto project maintained by [WZB](https://manifesto-project.wzb.eu/). You can either use the UK manifestos we looked at together in class, or collect your own set of manifestos by choosing the country/countries, year/years and party/parties you are interested in. You should produce a report which includes your code, that addresses the following aspects of creating a topic model, making sure to answer the questions below.
+
+## 1. Data acquisition, description, and preparation
+#### Manifesto data from WZB database
+```{r}
+mp_setapikey("manifesto_apikey.txt")
+```
+
+Create a dataset of the party manifestos from the United States and United Kingdom from 1960 until the present. 
+```{r}
+# define countries of interest
+countries <- c('United States', 'United Kingdom')
+
+# create list of corpus from US and UK starting 1960
+corpus_list <- list()
+for (i in countries) {
+ x <- mp_corpus(countryname == i  & edate > as.Date("1960-01-01"))
+ corpus_list[[i]] <- x
+}
+
+# extract manifestos per country and combine to a dataframe
+df_list <- list()
+country_list <- list()
+for (j in 1:length(corpus_list)) {
+ doc <-  corpus_list[[j]]
+ for (k in 1:length(doc)){
+  temp <- doc[[k]]
+  df <- temp %>% as.data.frame() %>% 
+   select(text) %>% mutate(source = names(doc[k]))
+  df_list[[k]] <- df
+  country_df <- do.call(rbind.data.frame, df_list) %>% 
+   na_if("") %>% na.omit %>% 
+   mutate(country = names(corpus_list[j])) 
+ }
+ country_list[[j]] <- country_df
+ full_df <- do.call(rbind.data.frame, country_list)
+}
+```
+
+```{r}
+# separate sentences
+df_list <- list()
+country_list <- list()
+for (j in 1:length(corpus_list)) {
+ doc <-  corpus_list[[j]]
+ for (k in 1:length(doc)){
+  temp <- doc[[k]]
+  df <- if (length(temp) == 1) temp %>% str_split(., "[.]") %>% unlist() %>% as.data.frame() %>% rename(., text = .)
+        else temp %>% as.data.frame() %>% select(text)
+  df <- df %>% mutate(source = names(doc[k]))
+  df_list[[k]] <- df
+  country_df <- do.call(rbind.data.frame, df_list) %>% 
+   na_if("") %>% na.omit %>% 
+   mutate(country = names(corpus_list[j]))
+ }
+ country_list[[j]] <- country_df
+ full_df <- do.call(rbind.data.frame, country_list)
+}
+```
+
+```{r}
+# get meta dataset and create id to match with corpus df 
+corpus_dict <- main %>% 
+ mutate(corpus_code = paste0(party, "_", date)) %>% 
+ select(corpus_code, edate, partyname, partyabbrev)
+
+# join dfs to match party, date, country
+corpus_df <- inner_join(corpus_dict, full_df, by = c("corpus_code" = "source"))
+
+# filter df 
+foreign_df <- corpus_df %>% 
+  filter(str_detect(text, 'Foreign|foreign|foreign policy|Foreign Policy|FOREIGN POLICY|FOREIGN'))
+```
+
+```{r}
+# create document feature matrix
+dfmat <- foreign_df %>%
+ select(text) %>% 
+ unlist() %>% 
+ tokens(remove_punc = TRUE) %>% 
+ tokens_remove(pattern=stopwords("en")) %>% 
+ tokens_replace(pattern = lexicon::hash_lemmas$token, replacement = lexicon::hash_lemmas$lemma) %>%
+ dfm()
+dfmat
+```
+
+## 2. Research question
+
+Describe a research question you want to explore with topic modelling. Comment on how answerable this is with the methods and data at your disposal.
+
+## 3. Topic model development
+
+Create a topic model using your data. Explain to a non-specialist what the topic model does. Comment on the choices you make here in terms of hyperparameter selection and model choice. How might these affect your results and the ability to answer your research question?
+ 
+```{r}
+
+```
+ 
+ 
+ ## 4. Topic model description
+ 
+ Describe the topic model. What topics does it contain? How are these distributed across the data?
+ 
+ ## 5. Answering your research question
+ 
+ Use your topic model to answer your research question by showing plots or statistical results. Discuss the implications of what you find, and any limitations inherent in your approach. Discuss how the work could be improved upon in future research.
