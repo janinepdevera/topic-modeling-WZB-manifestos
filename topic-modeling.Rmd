@@ -10,7 +10,6 @@ citation_package: natbib
 header-includes:
  - \usepackage{booktabs}
 - \usepackage{xcolor}
-
 extra_dependencies: ["hyperref","booktabs"]
 urlcolor: blue
 bibliography: ../presentation-resources/MyLibrary.bib
@@ -24,7 +23,8 @@ knitr::opts_chunk$set(echo = FALSE,
 ```
 
 ```{r, include = FALSE}
-pacman::p_load(tidyverse, readr, stringr, quanteda, quanteda.textstats, rvest, tibble, xml2, manifestoR)
+pacman::p_load(tidyverse, readr, stringr, quanteda, quanteda.textstats, rvest, 
+               tibble, xml2, manifestoR, topicmodels, tidytext, stm)
 ```
 
 ```{r, include = FALSE}
@@ -43,7 +43,8 @@ charts.theme <- theme(axis.title.y.left = element_text(size = 12, margin = margi
                       plot.subtitle = element_text(size = 10, face = "italic", hjust = 0.5, margin = margin(b = 15)),
                       plot.caption = element_text(size = 10, hjust = 0),
                       strip.background = element_rect(fill = "transparent"),
-                      strip.text = element_text(size = 12))
+                      strip.text = element_text(size = 12),
+                      legend.key=element_blank())
 ```
 
 
@@ -89,7 +90,7 @@ for (j in 1:length(corpus_list)) {
 ```
 
 ```{r}
-# separate sentences
+# separate sentences, extract manifestos per country, and combine to a dataframe
 df_list <- list()
 country_list <- list()
 for (j in 1:length(corpus_list)) {
@@ -131,11 +132,195 @@ dfmat <- foreign_df %>%
  tokens(remove_punc = TRUE) %>% 
  tokens_remove(pattern=stopwords("en")) %>% 
  tokens_replace(pattern = lexicon::hash_lemmas$token, replacement = lexicon::hash_lemmas$lemma) %>%
- dfm()
+ dfm() #%>% 
+ #dfm_tfidf()
 dfmat
+
+rownames(dfmat) <- foreign_df$corpus_code
+
 ```
 
+
+```{r}
+topfeatures(dfmat, n = 30, scheme = "docfreq")
+```
+
+```{r}
+lda <- LDA(dfmat,  4)
+```
+
+```{r}
+# document-topic probability
+topics <- tidy(lda, matrix = "gamma") %>% 
+ mutate(document_id = str_remove(document, "\\.[1-9]*$")) %>% 
+ left_join(., foreign_df %>% select(!text), by = c("document_id" = "corpus_code"))
+ 
+topic_df <- topics %>%
+ mutate(year = lubridate::year(edate)) %>% 
+ mutate(period = ifelse(year < 1991, "Cold War", "Post-Cold War")) %>% 
+ na.omit
+
+# check how many documents there are per period
+topic_df %>% 
+   group_by(period) %>%
+   summarise(counts = n())
+```
+
+```{r}
+# share of topics per time period
+share_period <- topic_df %>% 
+ group_by(period, topic) %>% 
+ summarise(gamma = sum(gamma)) %>% 
+ group_by(period) %>% 
+ mutate(year_share = gamma/sum(gamma)) %>% 
+ ungroup() %>% 
+ mutate(topic = factor(topic))
+
+# share of topics per time period
+share_period_country <- topic_df %>% 
+ group_by(period, topic, country) %>% 
+ summarise(gamma = sum(gamma)) %>% 
+ group_by(period, country) %>% 
+ mutate(year_share = gamma/sum(gamma)) %>% 
+ ungroup() %>% 
+ mutate(topic = factor(topic))
+```
+
+
+This plot shows us 
+```{r}
+plot1_df <- share_period %>% 
+ group_by(period) %>% 
+ mutate(alpha = ifelse(max(year_share) == year_share, "yes", "no"),
+        year_share = ifelse(period == "Cold War", -1*year_share, year_share))
+
+
+plot1 <-  ggplot(plot1_df, aes(x=fct_rev(topic), y=year_share*100, label=period)) + 
+  geom_hline(yintercept = 0, size = 0.4, linetype = 2) +
+  geom_point(stat='identity', fill="black", size=6, aes(color = period, alpha = alpha))  +
+  geom_segment(aes(y = 0, 
+                   x = topic, 
+                   yend = ifelse(period == "Cold War", year_share*100 + 1.5, year_share*100 - 1.5), 
+                   xend = topic, 
+                   color = period,
+                   alpha = alpha),
+               size = 1.5) +
+  labs(title="Share of foreign policy topics per period", 
+       subtitle="Cold War vs Post-Cold War") + 
+  xlab("topic") + 
+  ylab("% share of topic") + 
+  scale_y_continuous(limits = c(-40, 40), breaks = c(-40, -20, 0, 20, 40), labels = abs) + 
+  scale_color_manual(values = c("#ba0000", "#234075")) + 
+  scale_alpha_manual(values = c(0.5, 1)) + 
+  guides(alpha = "none") + 
+  charts.theme +
+  coord_flip()
+plot1
+```
+```{r}
+plot2_df <- share_period_country %>% 
+ group_by(period, country) %>% 
+ mutate(alpha = ifelse(max(year_share) == year_share, "yes", "no"),
+        year_share = ifelse(period == "Cold War", -1*year_share, year_share))
+
+plot2 <-  ggplot(plot2_df, aes(x=fct_rev(topic), y=year_share*100, label=period)) + 
+  geom_hline(yintercept = 0, size = 0.4, linetype = 2) +
+  geom_point(stat='identity', fill="black", size=6, aes(color = period, alpha = alpha))  +
+  geom_segment(aes(y = 0, 
+                   x = topic, 
+                   yend = ifelse(period == "Cold War", year_share*100 + 3.2, year_share*100 - 3.2), 
+                   xend = topic, 
+                   color = period,
+                   alpha = alpha),
+               size = 1.5) +
+  labs(title="Share of foreign policy topics per period and per country", 
+       subtitle="Cold War vs Post-Cold War") + 
+  xlab("topic") + 
+  ylab("% share of topic") + 
+  scale_y_continuous(limits = c(-50, 40), breaks = c(-40, -20, 0, 20, 40), labels = abs) + 
+  scale_color_manual(values = c("#ba0000", "#234075")) + 
+  scale_alpha_manual(values = c(0.5, 1)) + 
+  guides(alpha = "none") + 
+  charts.theme +
+  coord_flip() + 
+  facet_wrap(~country)
+plot2
+```
+
+```{r}
+# topic-word probability (words most common in each topic)
+top_words <- tidy(lda, matrix = "beta") %>% 
+ group_by(topic) %>% 
+ slice_max(beta, n = 200) %>% 
+ ungroup() %>%
+ arrange(topic, -beta) %>% 
+ filter(topic %in% c(3, 4))
+top_words
+```
+
+```{r}
+word_type <- top_words %>% 
+ pivot_wider(id_cols = topic:beta, values_from = beta, names_from = topic) %>% 
+ mutate(type = ifelse(!is.na(`3`) & !is.na(`4`), "common", "unique")) 
+ #filter(!(!is.na(`3`) & !is.na(`4`))) 
+
+word_type %>% 
+   group_by(type) %>%
+   summarise(counts = n())
+```
+
+```{r}
+plot3_df <- word_type %>% 
+ pivot_longer(cols = `3`:`4`, names_to = "topic")
+
+plot3 <- ggplot(plot3_df %>% filter(value < 0.05), aes(x = type, value)) + # remove outlier
+ geom_jitter(aes(color = topic, alpha = topic), size = 4) + 
+ scale_color_manual(values = c("#ba0000", "#234075")) + 
+ scale_alpha_manual(values = c(0.6, 0.6)) + 
+ xlab("") + 
+ ylab("beta") + 
+ guides(alpha = "none") + 
+ labs(title = "Common and Unique Words",
+      subtitle = "topic 3 & topic 4", 
+      caption = "Beta refers to the probability that a word appears in a particular topic") + 
+ charts.theme
+plot3
+```
+
+Take top 10 words for each topic
+```{r}
+unique_words <- top_words %>% 
+ pivot_wider(id_cols = topic:beta, values_from = beta, names_from = topic) %>% 
+ filter(!(!is.na(`3`) & !is.na(`4`))) %>% 
+ pivot_longer(cols = `3`:`4`, names_to = "topic") %>% 
+ group_by(topic) %>% 
+ slice_max(value, n = 15) %>% 
+ ungroup() %>%
+ arrange(topic, -value)
+```
+
+```{r}
+plot4_df <- unique_words %>% 
+  mutate(term = reorder_within(term, value, topic),
+         topic = ifelse(topic == "3", "topic 3", "topic 4"))
+
+plot4 <-  ggplot(plot4_df, aes(value, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_fill_manual(values = c("#ba0000", "#234075")) + 
+  labs(title = "Top 10 words per foreign policy topic",
+       subtitle = "topic 3 vs topic 4", 
+       caption = "Beta refers to the probability that a word appears in a particular topic") + 
+  xlab("beta") + 
+  charts.theme + 
+  scale_y_reordered()
+plot4
+```
+
+
 ## 2. Research question
+
+The research question 
 
 Describe a research question you want to explore with topic modelling. Comment on how answerable this is with the methods and data at your disposal.
 
