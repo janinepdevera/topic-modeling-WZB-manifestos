@@ -1,15 +1,16 @@
 ---
- title: "Assignment 2"
+title: "Assignment 2"
 subtitle: "Text as Data"
-date: "2022-10-13"
+date: "2022-11-17"
 author: "Janine De Vera | 219848"
 output: 
- pdf_document:
- keep_tex: true
-citation_package: natbib
+  pdf_document:
+    keep_tex: true
+    citation_package: natbib
 header-includes:
- - \usepackage{booktabs}
+- \usepackage{booktabs}
 - \usepackage{xcolor}
+
 extra_dependencies: ["hyperref","booktabs"]
 urlcolor: blue
 bibliography: ../presentation-resources/MyLibrary.bib
@@ -24,10 +25,12 @@ knitr::opts_chunk$set(echo = FALSE,
 
 ```{r, include = FALSE}
 pacman::p_load(tidyverse, readr, stringr, quanteda, quanteda.textstats, rvest, 
-               tibble, xml2, manifestoR, topicmodels, tidytext, stm)
+               tibble, xml2, manifestoR, topicmodels, tidytext, stm, kable, kableExtra)
 ```
 
 ```{r, include = FALSE}
+pathcharts <- paste0(getwd(),"/charts")
+
 charts.theme <- theme(axis.title.y.left = element_text(size = 12, margin = margin(r = 15)),
                       axis.title.y.right = element_text(size = 12, margin = margin(l = 15)),
                       axis.title.x = element_text(size = 12, margin = margin(t = 15)),
@@ -48,18 +51,26 @@ charts.theme <- theme(axis.title.y.left = element_text(size = 12, margin = margi
 ```
 
 
- # Introduction
+# Introduction
  
- In this assignment, you are asked to use topic modelling to investigate manifestos from the manifesto project maintained by [WZB](https://manifesto-project.wzb.eu/). You can either use the UK manifestos we looked at together in class, or collect your own set of manifestos by choosing the country/countries, year/years and party/parties you are interested in. You should produce a report which includes your code, that addresses the following aspects of creating a topic model, making sure to answer the questions below.
+In this assignment, you are asked to use topic modelling to investigate manifestos from the manifesto project maintained by [WZB](https://manifesto-project.wzb.eu/). You can either use the UK manifestos we looked at together in class, or collect your own set of manifestos by choosing the country/countries, year/years and party/parties you are interested in. You should produce a report which includes your code, that addresses the following aspects of creating a topic model, making sure to answer the questions below.
 
 ## 1. Data acquisition, description, and preparation
-#### Manifesto data from WZB database
-```{r}
+
+### 1.1 Prepare dataframe
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
 mp_setapikey("manifesto_apikey.txt")
 ```
 
-Create a dataset of the party manifestos from the United States and United Kingdom from 1960 until the present. 
-```{r}
+For this task, I retrieve a dataset of party manifestos from the **United States and United Kingdom between 1960 and 2022**. Each country and each year will have a unique corpus. In order to create a dataframe where each text is one observation, I follow these steps: 
+\begin{enumerate}
+  \item Create a list containing all corpora from US and UK for the years of interest.
+  \item Extract manifestos from each corpus. Some manifestos treat each sentence as one observation while others have the entire text in a single line. For the latter, I separate the full text into sentences and process accordingly (e.g. remove blanks).
+  \item Construct a dataframe where each observation is a line from the manifesto. 
+  \item Merge the corpus dataframe with the WZB meta dataframe in order to get corresponding information on the year, party, and country. 
+\end{enumerate}
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
 # define countries of interest
 countries <- c('United States', 'United Kingdom')
 
@@ -70,26 +81,6 @@ for (i in countries) {
  corpus_list[[i]] <- x
 }
 
-# extract manifestos per country and combine to a dataframe
-df_list <- list()
-country_list <- list()
-for (j in 1:length(corpus_list)) {
- doc <-  corpus_list[[j]]
- for (k in 1:length(doc)){
-  temp <- doc[[k]]
-  df <- temp %>% as.data.frame() %>% 
-   select(text) %>% mutate(source = names(doc[k]))
-  df_list[[k]] <- df
-  country_df <- do.call(rbind.data.frame, df_list) %>% 
-   na_if("") %>% na.omit %>% 
-   mutate(country = names(corpus_list[j])) 
- }
- country_list[[j]] <- country_df
- full_df <- do.call(rbind.data.frame, country_list)
-}
-```
-
-```{r}
 # separate sentences, extract manifestos per country, and combine to a dataframe
 df_list <- list()
 country_list <- list()
@@ -110,7 +101,32 @@ for (j in 1:length(corpus_list)) {
 }
 ```
 
-```{r}
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+# extract manifestos per country and combine to a dataframe without separating sentences
+
+# df_list <- list()
+# country_list <- list()
+# for (j in 1:length(corpus_list)) {
+#  doc <-  corpus_list[[j]]
+#  for (k in 1:length(doc)){
+#   temp <- doc[[k]]
+#   df <- temp %>% as.data.frame() %>% 
+#    select(text) %>% mutate(source = names(doc[k]))
+#   df_list[[k]] <- df
+#   country_df <- do.call(rbind.data.frame, df_list) %>% 
+#    na_if("") %>% na.omit %>% 
+#    mutate(country = names(corpus_list[j])) 
+#  }
+#  country_list[[j]] <- country_df
+#  full_df <- do.call(rbind.data.frame, country_list)
+# }
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+main <- mp_maindataset()
+```
+
+```{r, message=FALSE, warning=FALSE, echp=FALSE}
 # get meta dataset and create id to match with corpus df 
 corpus_dict <- main %>% 
  mutate(corpus_code = paste0(party, "_", date)) %>% 
@@ -119,12 +135,53 @@ corpus_dict <- main %>%
 # join dfs to match party, date, country
 corpus_df <- inner_join(corpus_dict, full_df, by = c("corpus_code" = "source"))
 
+head(corpus_df)
+```
+
+Since I am interested in trends in **foreign policy**, I only need a subset of the dataframe above. I filter texts that contain the words *foreign policy* or *foreign*. The research question will be discussed in more detail in the next section. 
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
 # filter df 
 foreign_df <- corpus_df %>% 
   filter(str_detect(text, 'Foreign|foreign|foreign policy|Foreign Policy|FOREIGN POLICY|FOREIGN'))
 ```
+\
+Below are some information on the dataset that I will use for the rest of the analysis. 
 
+\
+Number of texts:
 ```{r}
+nrow(foreign_df)
+```
+
+Years included:
+```{r}
+lubridate::year(foreign_df$edate) %>% unique()
+```
+
+Countries: 
+```{r}
+foreign_df %>% select(country) %>% unique()
+```
+
+Parties by Country: 
+```{r}
+foreign_df %>% select(country, partyname) %>% unique()
+```
+
+### 1.2 Prepare document feature matrix
+
+For the document feature matrix, I treat each line of text as one "document". This is tokenized and pre-processed as follows: 
+
+\begin{enumerate}
+  \item Remove punctuation
+  \item Remove English stop words 
+  \item Lemmatization
+\end{enumerate}
+
+It is important to conduct these pre-processing steps since they will affect the analysis later on. I remove punctuation marks and stop words since they do not provide any additional information regarding my research question. I opt for lemmatization so words with similar context are analyzed together. As a final pre-processing step, I rename the rows of the document feature matrix with meaningful IDs, specifically the corpus code from my original dataframe. The document feature matrix has 954 documents and 3,266 features. 
+\
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
 # create document feature matrix
 dfmat <- foreign_df %>%
  select(text) %>% 
@@ -132,22 +189,55 @@ dfmat <- foreign_df %>%
  tokens(remove_punc = TRUE) %>% 
  tokens_remove(pattern=stopwords("en")) %>% 
  tokens_replace(pattern = lexicon::hash_lemmas$token, replacement = lexicon::hash_lemmas$lemma) %>%
- dfm() #%>% 
- #dfm_tfidf()
-dfmat
+ dfm()
 
+# rename dfm rows with meaningful IDs
 rownames(dfmat) <- foreign_df$corpus_code
 
+dfmat
 ```
 
-
+As a quick check, I extract the top 10 features of my document feature matrix.
 ```{r}
-topfeatures(dfmat, n = 30, scheme = "docfreq")
+topfeatures(dfmat, n = 10, scheme = "docfreq")
 ```
 
+## 2. Research question
+
+My main research questions is: 
+\
+
+**Was there a change in the foreign policy stance of the world's most influential democracies, United States and United Kingdom, during and after the Cold War?** 
+
+\
+The Cold War began in 1947 after World War II and lasted until the fall of the Soviet Union in 1991. It was a period characterized by geopolitcal tension between the United States and the Soviet Union and their respective allies. Foreign policy priorities of the United States and United Kingdom, WWII allies and two of the most influential democracies, were undoubtedly different now compared to when the world was on the brink of a large scale conflict.
+
+\
+Through topic modeling using party manifestos, I analyze how these priorities changed after the Cold War. Since manifestos are available for several years, it is possible to introduce the time component into the text analysis. Topic models generate phrases and words that it thinks are related. It does so by finding hidden semantic structure in documents and clustering them into similar groups that readers can understand. In this sense, the research question will be answered by extracting prominent topics within the defined time frame. 
+\
+
+I use the years 1960-1991 for the Cold War period and 1992-2022 for the post-Cold War period. This gives me roughly 30 years for each time period.
+
+## 3-4. Topic model development & topic model description
+
+To analyze my research question, I use the topic model Latent Dirichlet Allocation (LDA). As explained above, a topic model uses corpora (a set of documents) to find hidden semantic structures or configurations in texts that give them their intended meaning. Topic models provide a set of words and phrases that it finds to be related. 
+\
+
+LDA is a probabilistic model that treats each document as a combination of a fixed number of topics. These topics have a corresponding probability of appearing in a given document. In addition, each word in the corpus also has a probability of appearing in a given topic. The topics are determined by analyzing the co-occurence of these words. LDA produces two matrices. The the **gamma** matrix or **document-topic** matrix provides the probability of each topic appearing in a particular document, while the **beta** matrix or **topic-term** matrix provides the probability of each term belonging to a particular topic. 
+\
+
+#### LDA with four topics
+\
+
+The choice of the number of fixed topics is a hyperparameter - a modeling decision that the researcher has to make. For this LDA, I initially chose **four topics**. Setting this hyperparameter to a small number means that I want my topics to be relatively broad. This makes sense for the analysis because I first want to get an idea of the general themes in foreign policy stance during and after the Cold War. As I examine the words generatad per topic, I may opt to increase the hyperparameter to ask the model to come up with narrower topics.
+\
+
+Other hyperparameters are alpha_W which determines whether the researcher wants documents to be composed of several or few topics and alpha_H which determines whether topics should be composed of several or few words. I leave these hyperparameters at their default values because I already chose the number of topics and I am agnostic towards how many words each topic will contain. 
 ```{r}
 lda <- LDA(dfmat,  4)
 ```
+
+After running the LDA using the document feature matrix from foreign policy-related texts, I converted the results of the gamma matrix into a tidy dataframe and merged it with the original filtered dataframe containing information on foreign policy related text, year, and country. From here, I divided the data into two periods -- Cold War and Post-Cold War. Note that I dropped the party variable since it is not a significant angle in my analysis. 
 
 ```{r}
 # document-topic probability
@@ -158,14 +248,21 @@ topics <- tidy(lda, matrix = "gamma") %>%
 topic_df <- topics %>%
  mutate(year = lubridate::year(edate)) %>% 
  mutate(period = ifelse(year < 1991, "Cold War", "Post-Cold War")) %>% 
- na.omit
+ na.omit %>% 
+ select(document_id, topic, gamma, edate, country, year, period)
 
-# check how many documents there are per period
+head(topic_df)
+```
+
+This shows the number of document-topic pairs per period: 
+```{r}
+# check how many document-topic there are per period
 topic_df %>% 
    group_by(period) %>%
    summarise(counts = n())
 ```
 
+From here, I calculated the share of topics per time period, not distinguishing between countries. Results are shown in the plot below. 
 ```{r}
 # share of topics per time period
 share_period <- topic_df %>% 
@@ -175,19 +272,8 @@ share_period <- topic_df %>%
  mutate(year_share = gamma/sum(gamma)) %>% 
  ungroup() %>% 
  mutate(topic = factor(topic))
-
-# share of topics per time period
-share_period_country <- topic_df %>% 
- group_by(period, topic, country) %>% 
- summarise(gamma = sum(gamma)) %>% 
- group_by(period, country) %>% 
- mutate(year_share = gamma/sum(gamma)) %>% 
- ungroup() %>% 
- mutate(topic = factor(topic))
 ```
 
-
-This plot shows us 
 ```{r}
 plot1_df <- share_period %>% 
  group_by(period) %>% 
@@ -200,7 +286,7 @@ plot1 <-  ggplot(plot1_df, aes(x=fct_rev(topic), y=year_share*100, label=period)
   geom_point(stat='identity', fill="black", size=6, aes(color = period, alpha = alpha))  +
   geom_segment(aes(y = 0, 
                    x = topic, 
-                   yend = ifelse(period == "Cold War", year_share*100 + 1.5, year_share*100 - 1.5), 
+                   yend = ifelse(period == "Cold War", year_share*100 + 1, year_share*100 - 1), 
                    xend = topic, 
                    color = period,
                    alpha = alpha),
@@ -215,8 +301,31 @@ plot1 <-  ggplot(plot1_df, aes(x=fct_rev(topic), y=year_share*100, label=period)
   guides(alpha = "none") + 
   charts.theme +
   coord_flip()
-plot1
+
+#ggsave(filename="01_share_topics.png", plot=plot1, device="png", 
+       #path=pathcharts, width = 10, height = 6)
 ```
+
+```{r, out.width="98%"}
+knitr::include_graphics(paste0(pathcharts, "/01_share_topics.png"))
+```
+
+This chart shows the percentage share of each topic based on the sum of gamma probabilities. We see that the single most prominent topic during the Cold War is topic 1 and post-Cold War is topic 2.
+\
+
+I construct a similar chart to see if the same patterns can be observed for UK and US separately.
+
+```{r}
+# share of topics per time period per country
+share_period_country <- topic_df %>% 
+ group_by(period, topic, country) %>% 
+ summarise(gamma = sum(gamma)) %>% 
+ group_by(period, country) %>% 
+ mutate(year_share = gamma/sum(gamma)) %>% 
+ ungroup() %>% 
+ mutate(topic = factor(topic))
+```
+
 ```{r}
 plot2_df <- share_period_country %>% 
  group_by(period, country) %>% 
@@ -228,7 +337,7 @@ plot2 <-  ggplot(plot2_df, aes(x=fct_rev(topic), y=year_share*100, label=period)
   geom_point(stat='identity', fill="black", size=6, aes(color = period, alpha = alpha))  +
   geom_segment(aes(y = 0, 
                    x = topic, 
-                   yend = ifelse(period == "Cold War", year_share*100 + 3.2, year_share*100 - 3.2), 
+                   yend = ifelse(period == "Cold War", year_share*100 + 2, year_share*100 - 2), 
                    xend = topic, 
                    color = period,
                    alpha = alpha),
@@ -237,16 +346,26 @@ plot2 <-  ggplot(plot2_df, aes(x=fct_rev(topic), y=year_share*100, label=period)
        subtitle="Cold War vs Post-Cold War") + 
   xlab("topic") + 
   ylab("% share of topic") + 
-  scale_y_continuous(limits = c(-50, 40), breaks = c(-40, -20, 0, 20, 40), labels = abs) + 
+  scale_y_continuous(labels = abs) + 
   scale_color_manual(values = c("#ba0000", "#234075")) + 
   scale_alpha_manual(values = c(0.5, 1)) + 
   guides(alpha = "none") + 
   charts.theme +
   coord_flip() + 
   facet_wrap(~country)
-plot2
+
+#ggsave(filename="02_share_topics_country.png", plot=plot2, device="png", 
+       #path=pathcharts, width = 10, height = 6)
 ```
 
+```{r, out.width="98%"}
+knitr::include_graphics(paste0(pathcharts, "/02_share_topics_country.png"))
+```
+
+For both countries, topic 1 the most prominent topic during the Cold War. Post-Cold War,  topic 4 dominated in the UK, with topic 2 as a very close second, while topic 2 dominated in the US.
+\
+
+Based on this, we assume that we can associate topic 1 with foreign policies during the Cold War and topic 2 with foreign policies after the Cold War. I continue the analysis by looking at the beta or topic-term matrix. This time, I focus on what words make up topics 1 & 2. I extract the top 200 words with the highest probability of occurence per topic. 
 ```{r}
 # topic-word probability (words most common in each topic)
 top_words <- tidy(lda, matrix = "beta") %>% 
@@ -254,24 +373,24 @@ top_words <- tidy(lda, matrix = "beta") %>%
  slice_max(beta, n = 200) %>% 
  ungroup() %>%
  arrange(topic, -beta) %>% 
- filter(topic %in% c(3, 4))
+ filter(topic %in% c(1, 2))
 top_words
 ```
-
+I then categorize these words by whether they are common or unique to each topic. I do this as a rough check on how similar topics 1 and 2 are. I then visualize the words into a jitter plot which shows whether there are more common or unique words.
 ```{r}
 word_type <- top_words %>% 
  pivot_wider(id_cols = topic:beta, values_from = beta, names_from = topic) %>% 
- mutate(type = ifelse(!is.na(`3`) & !is.na(`4`), "common", "unique")) 
+ mutate(type = ifelse(!is.na(`1`) & !is.na(`2`), "common", "unique")) 
  #filter(!(!is.na(`3`) & !is.na(`4`))) 
 
-word_type %>% 
-   group_by(type) %>%
-   summarise(counts = n())
+# word_type %>% 
+#    group_by(type) %>%
+#    summarise(counts = n())
 ```
 
 ```{r}
 plot3_df <- word_type %>% 
- pivot_longer(cols = `3`:`4`, names_to = "topic")
+ pivot_longer(cols = `1`:`2`, names_to = "topic")
 
 plot3 <- ggplot(plot3_df %>% filter(value < 0.05), aes(x = type, value)) + # remove outlier
  geom_jitter(aes(color = topic, alpha = topic), size = 4) + 
@@ -281,18 +400,29 @@ plot3 <- ggplot(plot3_df %>% filter(value < 0.05), aes(x = type, value)) + # rem
  ylab("beta") + 
  guides(alpha = "none") + 
  labs(title = "Common and Unique Words",
-      subtitle = "topic 3 & topic 4", 
+      subtitle = "topic 1 & topic 2", 
       caption = "Beta refers to the probability that a word appears in a particular topic") + 
  charts.theme
-plot3
+
+#ggsave(filename="03_scatter_words.png", plot=plot3, device="png", 
+       #path=pathcharts, width = 10, height = 6)
 ```
 
-Take top 10 words for each topic
+```{r, out.width="98%"}
+knitr::include_graphics(paste0(pathcharts, "/03_scatter_words.png"))
+```
+
+We see from the figure that there are less common words as the cluster on the left is more dispersed. Using this information, I assume that topics 1 and 2 are more or less different and can be associated with two different time periods. 
+\
+
+As the next step, I take the top 15 words for each topic and visualize them in the plot below. 
+
 ```{r}
+# take top 10 words in each topic
 unique_words <- top_words %>% 
  pivot_wider(id_cols = topic:beta, values_from = beta, names_from = topic) %>% 
- filter(!(!is.na(`3`) & !is.na(`4`))) %>% 
- pivot_longer(cols = `3`:`4`, names_to = "topic") %>% 
+ filter(!(!is.na(`1`) & !is.na(`2`))) %>% 
+ pivot_longer(cols = `1`:`2`, names_to = "topic") %>% 
  group_by(topic) %>% 
  slice_max(value, n = 15) %>% 
  ungroup() %>%
@@ -302,41 +432,300 @@ unique_words <- top_words %>%
 ```{r}
 plot4_df <- unique_words %>% 
   mutate(term = reorder_within(term, value, topic),
-         topic = ifelse(topic == "3", "topic 3", "topic 4"))
+         topic = ifelse(topic == "1", "Topic 1", "Topic 2"))
 
 plot4 <-  ggplot(plot4_df, aes(value, term, fill = factor(topic))) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~ topic, scales = "free") +
   scale_fill_manual(values = c("#ba0000", "#234075")) + 
   labs(title = "Top 10 words per foreign policy topic",
-       subtitle = "topic 3 vs topic 4", 
+       subtitle = "topic 1 vs topic 2", 
        caption = "Beta refers to the probability that a word appears in a particular topic") + 
   xlab("beta") + 
   charts.theme + 
   scale_y_reordered()
-plot4
+
+#ggsave(filename="04_bar_words.png", plot=plot4, device="png", 
+       #path=pathcharts, width = 10, height = 6)
 ```
 
+```{r, out.width="98%"}
+knitr::include_graphics(paste0(pathcharts, "/04_bar_words.png"))
+```
 
-## 2. Research question
+The words under topic 1 appear to be roughly about **national security**, with terms like security, military, defense/defence, and intelligence. Meanwhile, the words under topic 2 are related to market **openness**. We see terms like trade, investment, market, open, and expand. With these results we can already see that there is indeed a difference between the foreign policies of US and UK during and after the Cold War. 
 
-The research question 
+#### LDA with ten topics
+\
 
-Describe a research question you want to explore with topic modelling. Comment on how answerable this is with the methods and data at your disposal.
+I conduct the same analysis above, this time setting 10 as the fixed number of topics. This is to check whether there will be significant changes in results when we ask the model for topics with a narrower scope.
 
-## 3. Topic model development
-
-Create a topic model using your data. Explain to a non-specialist what the topic model does. Comment on the choices you make here in terms of hyperparameter selection and model choice. How might these affect your results and the ability to answer your research question?
- 
 ```{r}
-
+lda_10 <- LDA(dfmat,  10)
 ```
+
+```{r}
+# document-topic probability
+topics_10 <- tidy(lda_10, matrix = "gamma") %>% 
+ mutate(document_id = str_remove(document, "\\.[1-9]*$")) %>% 
+ left_join(., foreign_df %>% select(!text), by = c("document_id" = "corpus_code"))
  
+topic_df_10 <- topics_10 %>%
+ mutate(year = lubridate::year(edate)) %>% 
+ mutate(period = ifelse(year < 1991, "Cold War", "Post-Cold War")) %>% 
+ na.omit %>% 
+ select(document_id, topic, gamma, edate, country, year, period)
+```
+
+```{r}
+# share of topics per time period
+share_period_10 <- topic_df_10 %>% 
+ group_by(period, topic) %>% 
+ summarise(gamma = sum(gamma)) %>% 
+ group_by(period) %>% 
+ mutate(year_share = gamma/sum(gamma)) %>% 
+ ungroup() %>% 
+ mutate(topic = factor(topic))
+```
+
+```{r}
+plot1_df_10 <- share_period_10 %>% 
+ group_by(period) %>% 
+ mutate(alpha = ifelse(max(year_share) == year_share, "yes", "no"),
+        year_share = ifelse(period == "Cold War", -1*year_share, year_share))
+
+
+plot1_10 <-  ggplot(plot1_df_10, aes(x=fct_rev(topic), y=year_share*100, label=period)) + 
+  geom_hline(yintercept = 0, size = 0.4, linetype = 2) +
+  geom_point(stat='identity', fill="black", size=6, aes(color = period, alpha = alpha))  +
+  geom_segment(aes(y = 0, 
+                   x = topic, 
+                   yend = ifelse(period == "Cold War", year_share*100 + 0.5, year_share*100 - 0.5), 
+                   xend = topic, 
+                   color = period,
+                   alpha = alpha),
+               size = 1.5) +
+  labs(title="Share of foreign policy topics per period", 
+       subtitle="Cold War vs Post-Cold War") + 
+  xlab("topic") + 
+  ylab("% share of topic") + 
+  scale_y_continuous(limits = c(-20, 20), breaks = c(-20, -10, 0, 10, 20), labels = abs) + 
+  scale_color_manual(values = c("#ba0000", "#234075")) + 
+  scale_alpha_manual(values = c(0.5, 1)) + 
+  guides(alpha = "none") + 
+  charts.theme +
+  coord_flip()
+
+#ggsave(filename="05_share_topics.png", plot=plot1_10, device="png", 
+       #path=pathcharts, width = 10, height = 6)
+```
+
+```{r, out.width="98%"}
+knitr::include_graphics(paste0(pathcharts, "/05_share_topics.png"))
+```
+
+We see that topic 8 is prominent during the Cold War, with topic 5 as a close second. After the Cold War, topic 10 was more prominent.
+
+```{r}
+# share of topics per time period per country
+share_period_country_10 <- topic_df_10 %>% 
+ group_by(period, topic, country) %>% 
+ summarise(gamma = sum(gamma)) %>% 
+ group_by(period, country) %>% 
+ mutate(year_share = gamma/sum(gamma)) %>% 
+ ungroup() %>% 
+ mutate(topic = factor(topic))
+```
+
+```{r}
+plot2_df_10 <- share_period_country_10 %>% 
+ group_by(period, country) %>% 
+ mutate(alpha = ifelse(max(year_share) == year_share, "yes", "no"),
+        year_share = ifelse(period == "Cold War", -1*year_share, year_share))
+
+plot2_10 <-  ggplot(plot2_df_10, aes(x=fct_rev(topic), y=year_share*100, label=period)) + 
+  geom_hline(yintercept = 0, size = 0.4, linetype = 2) +
+  geom_point(stat='identity', fill="black", size=6, aes(color = period, alpha = alpha))  +
+  geom_segment(aes(y = 0, 
+                   x = topic, 
+                   yend = ifelse(period == "Cold War", year_share*100 + 1.2, year_share*100 - 1.2), 
+                   xend = topic, 
+                   color = period,
+                   alpha = alpha),
+               size = 1.5) +
+  labs(title="Share of foreign policy topics per period and per country", 
+       subtitle="Cold War vs Post-Cold War") + 
+  xlab("topic") + 
+  ylab("% share of topic") + 
+  scale_y_continuous(labels = abs) + 
+  scale_color_manual(values = c("#ba0000", "#234075")) + 
+  scale_alpha_manual(values = c(0.5, 1)) + 
+  guides(alpha = "none") + 
+  charts.theme +
+  coord_flip() + 
+  facet_wrap(~country)
+
+#ggsave(filename="06_share_topics_country.png", plot=plot2_10, device="png", 
+       #path=pathcharts, width = 10, height = 6)
+```
+
+```{r, out.width="98%"}
+knitr::include_graphics(paste0(pathcharts, "/06_share_topics_country.png"))
+```
+
+When more topics are used, the differences between UK and US are more pronounced. Topic 1 has the highest probability of appearing in UK documents during the Cold War and topic 3 after the war. In the US, it's topic 8 and 10, respectively.
+
+```{r}
+# topic-word probability (words most common in each topic)
+top_words_10 <- tidy(lda_10, matrix = "beta") %>% 
+ group_by(topic) %>% 
+ slice_max(beta, n = 50) %>% 
+ ungroup() %>%
+ arrange(topic, -beta) %>% 
+ filter(topic %in% c(8, 10))
+```
+
+```{r}
+word_type_10 <- top_words_10 %>% 
+ pivot_wider(id_cols = topic:beta, values_from = beta, names_from = topic) %>% 
+ mutate(type = ifelse(!is.na(`8`) & !is.na(`10`), "common", "unique")) 
+ #filter(!(!is.na(`3`) & !is.na(`4`))) 
+
+# word_type %>% 
+#    group_by(type) %>%
+#    summarise(counts = n())
+```
+
+I look at the difference between topic 8 and 10 as the Cold War for the US. Compared to the the topics generated using in the 4-topic LDA, topics 8 and 10 have less words in common. 
+```{r}
+plot3_df_10 <- word_type_10 %>% 
+ pivot_longer(cols = `8`:`10`, names_to = "topic")
+
+plot3_10 <- ggplot(plot3_df_10 %>% filter(value < 0.05), aes(x = type, value)) + # remove outlier
+ geom_jitter(aes(color = topic, alpha = topic), size = 4) + 
+ scale_color_manual(values = c("#ba0000", "#234075")) + 
+ scale_alpha_manual(values = c(0.6, 0.6)) + 
+ xlab("") + 
+ ylab("beta") + 
+ guides(alpha = "none") + 
+ labs(title = "Common and Unique Words",
+      subtitle = "United States, topic 8 & topic 10", 
+      caption = "Beta refers to the probability that a word appears in a particular topic") + 
+ charts.theme
+
+#ggsave(filename="07_scatter_words.png", plot=plot3_10, device="png", 
+       #path=pathcharts, width = 10, height = 6)
+```
+
+```{r, out.width="98%"}
+knitr::include_graphics(paste0(pathcharts, "/07_scatter_words.png"))
+```
+
+Next, I check the common words for topics 8 and 10.
+
+```{r}
+# take top 10 words in each topic
+unique_words_10 <- top_words_10 %>% 
+ pivot_wider(id_cols = topic:beta, values_from = beta, names_from = topic) %>% 
+ filter(!(!is.na(`8`) & !is.na(`10`))) %>% 
+ pivot_longer(cols = `8`:`10`, names_to = "topic") %>% 
+ group_by(topic) %>% 
+ slice_max(value, n = 15) %>% 
+ ungroup() %>%
+ arrange(topic, -value)
+```
+
+```{r}
+plot4_df_10 <- unique_words_10 %>% 
+  mutate(term = reorder_within(term, value, topic),
+         topic = ifelse(topic == "8", "Topic 8", "Topic 10"))
+
+plot4_10 <-  ggplot(plot4_df_10, aes(value, term, fill = fct_rev(factor(topic)))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ fct_rev(topic), scales = "free") +
+  scale_fill_manual(values = c("#ba0000", "#234075")) + 
+  labs(title = "Top 10 words per foreign policy topic",
+       subtitle = "United States, topic 8 vs topic 10", 
+       caption = "Beta refers to the probability that a word appears in a particular topic") + 
+  xlab("beta") + 
+  charts.theme + 
+  scale_y_reordered()
+
+#ggsave(filename="08_bar_words.png", plot=plot4_10, device="png", 
+       #path=pathcharts, width = 10, height = 6)
+```
+
+```{r, out.width="98%"}
+knitr::include_graphics(paste0(pathcharts, "/08_bar_words.png"))
+```
+
+We see new words that were not in the 4-topic LDA. This shows another foreign policy consideration of the US during the Cold War: **reducing dependence on natural resources**. We see this from the words energy, oil, and source. Post-Cold War, the main consideration appears to be **global security and strengthening international relationships**. We find words such as security, world, economic, and alliance.
+\
+
+```{r}
+# topic-word probability (words most common in each topic)
+top_words_10 <- tidy(lda_10, matrix = "beta") %>% 
+ group_by(topic) %>% 
+ slice_max(beta, n = 50) %>% 
+ ungroup() %>%
+ arrange(topic, -beta) %>% 
+ filter(topic %in% c(1, 3))
+```
+
+```{r}
+# take top 10 words in each topic
+unique_words_10 <- top_words_10 %>% 
+ pivot_wider(id_cols = topic:beta, values_from = beta, names_from = topic) %>% 
+ filter(!(!is.na(`1`) & !is.na(`3`))) %>% 
+ pivot_longer(cols = `1`:`3`, names_to = "topic") %>% 
+ group_by(topic) %>% 
+ slice_max(value, n = 15) %>% 
+ ungroup() %>%
+ arrange(topic, -value)
+```
+
+```{r}
+plot4_df_10b <- unique_words_10 %>% 
+  mutate(term = reorder_within(term, value, topic),
+         topic = ifelse(topic == "1", "Topic 1", "Topic 2"))
+
+plot4_10b <-  ggplot(plot4_df_10b, aes(value, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_fill_manual(values = c("#ba0000", "#234075")) + 
+  labs(title = "Top 10 words per foreign policy topic",
+       subtitle = "United Kingdom, topic 1 vs topic 3", 
+       caption = "Beta refers to the probability that a word appears in a particular topic") + 
+  xlab("beta") + 
+  charts.theme + 
+  scale_y_reordered()
+
+#ggsave(filename="09_bar_words.png", plot=plot4_10b, device="png", 
+       #path=pathcharts, width = 10, height = 6)
+```
+
+The results for UK show different foreign policy priorities. During the Cold War, it appears they focused more on **human rights and world peace**. After the war, focus shifted to **tax cuts and national spending**. 
+\
+```{r, out.width="98%"}
+knitr::include_graphics(paste0(pathcharts, "/09_bar_words.png"))
+```
+
+
+One noticeable difference between the 4-topic LDA and 10-topic LDA is that we are able to form more concrete ideas using the latter. When topics were, we found similar words. After asking the model to generate narrower topics, we actually found coherent phrases. 
+
+## 5. Answering your research question
  
- ## 4. Topic model description
- 
- Describe the topic model. What topics does it contain? How are these distributed across the data?
- 
- ## 5. Answering your research question
- 
- Use your topic model to answer your research question by showing plots or statistical results. Discuss the implications of what you find, and any limitations inherent in your approach. Discuss how the work could be improved upon in future research.
+Going back to the research question:
+\
+**Was there a change in the foreign policy stance of the world's most influential democracies, United States and United Kingdom, during and after the Cold War?** 
+\
+
+I find that there was indeed a difference in the foreign policy priorities of the two countries during and after the Cold War. Between 1960-1991, national security, human rights and world peace, and dependence on natural resources were the main concerns. Beginning 1991, focus shifted to openness, global security, international relations, and economic activity. Further, I find that there is a difference between the foreign policy priorities of US and UK, even though they were close allies during the Cold War. 
+\
+
+One limitation of this analysis (and using LDA) is the fact that the model's ability to generate meaningful insights is heavily dependent on a hyperparameter that is set by the researcher. Depending on the corpus, the hyperparameter may be highly sensitive - setting it small will generate completely different topics compared to setting it high. However, topic modeling is still a very useful tool in approaching questions that require text analysis. It is a more scientific approach compared to perusing several documents manually. 
+
+As to my approach to answering the research question, one limitation is that I was only able to make comparisons across topics and not across words. This is because only the document-topic matrix can be matched to the original dataframe. Time-based comparisons per word was conducted based on the assumption that a certain topic belongs exclusively to a certain period. This is not that big an issue in this case since there were prominent topics for the chosen years, but in cases where the distinction is not as defined, this approach will be less accurate. 
+
+As an additional angle, statistical tests could be conducted on group averages (e.g. the probability of topic 1 appearing in period 1 vs period 2) to see if there is empirical evidence supporting the grouping.
+
